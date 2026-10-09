@@ -55,6 +55,26 @@ Our core design mandate was **"Defensive Simplicity."** When building integratio
 
 ## 3. Data Cleaning, Processing & Transformation Pipeline
 
+### What the Dataset Is
+The pipeline ingests prospect data typically provided as a raw CSV file (`leads.csv`). This dataset represents inbound leads generated from sales campaigns, web forms, or third-party lead brokers. 
+
+In its raw state, lead data is unvalidated, prone to duplicate entries, and vulnerable to inconsistent string formatting.
+
+### Dataset Schema Matrix
+
+| Column Header | Data Type | Description | Example Entry | Validation/Cleaning Rule |
+| :--- | :--- | :--- | :--- | :--- |
+| `full_name` | String / Varchar | Prospect's primary name | `Arjun Patel` | Strip whitespace, format title casing |
+| `email` | String / Varchar | Prospect's unique contact address | `arjun@ledgerloop.example` | Lowercase conversion, uniqueness constraint |
+| `company_name` | String / Varchar | Organization or firm name | `Ledgerloop` | Trim strings, fallback to "N/A" if empty |
+
+### Preprocessing & Hygiene Objectives
+1. **Uniqueness Enforcement:** The `email` field serves as the immutable natural key across the pipeline to prevent duplicate outreach.
+2. **Sanitization:** Raw string parsing strips unexpected newline characters, trailing quotes, and leading spaces before sending records to downstream database layers.
+3. **Type Safety:** Ensures JSON conversion layers preserve key-value string pairs without corrupting special characters in emails or company names.
+
+---
+
 Raw prospect data from CSV extracts is notoriously unclean. The pipeline applies automated preprocessing protocols before any data hits persistent storage:
 * **String Sanitization:** Names, email addresses, and corporate identifiers are dynamically stripped of leading/trailing whitespace, null bytes, and illegal characters.
 * **Normalization & Casing:** Email strings are cast to lowercase to prevent duplicate records caused by casing discrepancies (e.g., `Arjun@Example.com` vs `arjun@example.com`).
