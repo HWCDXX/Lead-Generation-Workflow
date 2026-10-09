@@ -1,0 +1,304 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -288,
+        -128
+      ],
+      "id": "f108dcb5-f05b-4ccb-994f-a33c059fc6ed",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "raw_leads"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -32
+      ],
+      "id": "149dd787-9b07-4b72-ae04-0a4f699e6ccc",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "95tVOAudKPz26NsE",
+          "name": "supa lead db"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.cleaned_status }}",
+                    "rightValue": "Valid",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "9d7c5336-ad56-4aa1-8d14-add6020d5fd9"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        16
+      ],
+      "id": "35593e49-8554-4455-b583-bc07745afc15",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all valid leads from Output 0 into a single array\nconst validLeads = $input.all().map((item, index) => ({\n  lead_id: index + 1,\n  email: item.json.email,\n  first_name: item.json.first_name,\n  company_name: item.json.company_name,\n  job_title: item.json.job_title,\n  tool_input: item.json.tool_input,\n  tool_output: item.json.tool_output\n}));\n\n// Return as a single item wrapping the array\nreturn [{ json: { leads_array: validLeads } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        -320
+      ],
+      "id": "7616540f-05e7-4e1f-956d-01068cbbcb72",
+      "name": "Prepare batch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const seenEmails = new Set();\n\nfor (const item of $input.all()) {\n  const email = (item.json.email || '').toLowerCase().trim();\n  const jobTitle = (item.json.job_title || '').toLowerCase().trim();\n  const toolInput = (item.json.tool_input || '').toLowerCase().trim();\n  const firstName = (item.json.first_name || '').toLowerCase().trim();\n\n  let status = 'Valid';\n  let rejection_reason = '';\n\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\n  // 1. Basic Email Format Check\n  if (!emailRegex.test(email)) {\n    status = 'Rejected';\n    rejection_reason = 'Invalid email address format';\n  } \n  // 2. Check for Duplicates in Batch\n  else if (seenEmails.has(email)) {\n    status = 'Rejected';\n    rejection_reason = 'Duplicate submission within dataset';\n  }\n  // 3. Filter Incomplete / Null Data\n  else if (\n    !toolInput || \n    toolInput === 'null' || \n    toolInput.trim() === '' ||\n    !item.json.tool_output || \n    item.json.tool_output === 'null'\n  ) {\n    status = 'Rejected';\n    rejection_reason = 'Incomplete submission (missing tool input or output)';\n  }\n  // 4. Filter Test Entries\n  else if (\n    email.includes('test@') || \n    email.includes('asdf') || \n    toolInput === 'test' || \n    toolInput.includes('12345') || \n    firstName === 'test'\n  ) {\n    status = 'Rejected';\n    rejection_reason = 'Test entry with placeholder data';\n  } \n  // 5. Filter Non-Buyers\n  else if (\n    jobTitle.includes('open to work') ||\n    jobTitle.includes('student') || \n    jobTitle.includes('intern') || \n    jobTitle.includes('seeking job') || \n    toolInput.includes('homework') || \n    toolInput.includes('zero budget')\n  ) {\n    status = 'Rejected';\n    rejection_reason = 'Non-buyer profile (student/academic/no budget)';\n  } else {\n    seenEmails.add(email);\n  }\n\n  item.json.cleaned_status = status;\n  item.json.rejection_reason = rejection_reason;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -224
+      ],
+      "id": "dedb030a-0ec6-49f3-89b7-997aba77c63e",
+      "name": "Identify data"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-flash-lite-latest",
+          "mode": "list",
+          "cachedResultName": "models/gemini-flash-lite-latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a Principal Growth Partner at Myntmore. You evaluate incoming tool leads and draft high-converting, executive-ready outreach. Your tone is refined, opportunistic, and direct—written for decision-makers who build, invest, and scale.\n\nOUR CORE SERVICES:\n1. Personal Branding\n2. LinkedIn Outreach\n3. Cold Email\n4. Lead Generation\n\nINPUT LEADS DATA:\n{{ JSON.stringify($json.leads_array) }}\n\nEVALUATION & SCORING MATRIX:\n- HIGH FIT (Score 8 - 10): Founders, C-Suite, VPs, or Agency Owners showing high intent with clear commercial synergy.\n- MID FIT (Score 5 - 7): Department Leads, Senior Managers, or Solopreneurs with moderate intent or partial fit.\n- LOW FIT (Score 1 - 4): Non-buyers, students, test inputs, or mismatched consumer queries.\n\nENRICHMENT RULES:\nFor each lead, evaluate their role, company, and email to generate dynamic estimates for:\n1. \"company_size\": (e.g., \"1-10 employees\", \"10-50 employees\", \"50-250 employees\", \"250-1000 employees\", or \"Self-Employed\")\n2. \"funding_stage\": (e.g., \"Bootstrapped\", \"Seed\", \"Series A\", \"Series B+\", or \"N/A\")\n3. \"linkedin_activity\": (e.g., \"High active posting\", \"Moderate executive engagement\", or \"Low / Inactive presence\")\n\nOUTREACH DRAFTING RULES:\n1. LOW SCORERS (1 - 4):\n   - Set \"generated_email\" to null. Absolutely NO email draft.\n\n2. MID & HIGH SCORERS (5 - 10):\n   - Draft a crisp, human, high-conviction email.\n   - Tone: Slick, classy, professional, and opportunistic. Frame the touchpoint around partnership, leverage, and scaling pipeline.\n   - Relevance: Directly reference their exact tool input and tool output to establish immediate context.\n   - Grammar & Flow: Flawless prose. Use correct articles (e.g., \"a 100% ROI\", NOT \"an 100%\").\n   - Formatting: Write emails with ACTUAL RETURN / LINE BREAK SPACES in the string, NOT literal \"\\n\" characters.\n   - Constraints: Under 100 words. Absolutely NO em dashes (—), NO fluff, NO desperation, and NO invented claims or numbers.\n   - Call to Action: The ONLY allowed meeting link is: myntmore.com/founder-meeting \n\nOUTPUT REQUIREMENT (STRICT JSON ONLY, NO MARKDOWN CODE FENCES):\n[\n  {\n    \"lead_id\": 1,\n    \"email\": \"alex@venturepartners.com\",\n    \"score\": 9,\n    \"matched_service\": \"LinkedIn Outreach\",\n    \"score_reason\": \"High-intent founder projecting significant pipeline ROI from outreach calculations.\",\n    \"generated_email\": \"Hi Alex,\\n\\nYou ran our calculator projecting 3 deals from 400 monthly touchpoints—a clean 100% ROI.\\n\\nCalculating the leverage is step one. At Myntmore, we handle the end-to-end execution of your LinkedIn outreach, securing those exact meeting targets without burning your internal bandwidth.\\n\\nLet us connect directly: myntmore.com/founder-meeting\\n\\nBest,\\nMyntmore Team\",\n    \"company_size\": \"50-250 employees\",\n    \"funding_stage\": \"Series A\",\n    \"linkedin_activity\": \"High active posting\"\n  },\n  {\n    \"lead_id\": 2,\n    \"email\": \"mark@test.com\",\n    \"score\": 3,\n    \"matched_service\": \"Lead Generation\",\n    \"score_reason\": \"Low-intent test entry with no actionable business fit.\",\n    \"generated_email\": null,\n    \"company_size\": \"1-10 employees\",\n    \"funding_stage\": \"Bootstrapped\",\n    \"linkedin_activity\": \"Low / Inactive presence\"\n  }\n]"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        816,
+        -208
+      ],
+      "id": "ee8f74c2-292d-4952-aa7b-7177c98f0e2d",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "1Y7ILjSjkwBHfh2u",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract raw response from Gemini\nconst item = $input.first().json;\n\nlet rawText = \n  item.content?.parts?.[0]?.text ||\n  item.candidates?.[0]?.content?.parts?.[0]?.text ||\n  item.text ||\n  '';\n\n// Clean out markdown wrapper fences\nrawText = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();\n\ntry {\n  const parsedLeads = JSON.parse(rawText);\n\n  // DEDUPLICATION: Ensure only one entry per email per batch\n  const uniqueLeadsMap = new Map();\n  for (const lead of parsedLeads) {\n    if (lead && lead.email) {\n      uniqueLeadsMap.set(lead.email.toLowerCase().trim(), lead);\n    }\n  }\n  const uniqueLeads = Array.from(uniqueLeadsMap.values());\n\n  const processedItems = uniqueLeads.map(lead => {\n    let emailText = lead.generated_email;\n\n    if (emailText && typeof emailText === 'string') {\n      emailText = emailText.split('\\\\n').join('\\n');\n      emailText = emailText.replace(/\\ban 100/gi, 'a 100');\n    }\n\n    let status, route, routingDestination, reviewStatus, rejectionReason;\n\n    // Three-tier classification logic based on your score\n    if (lead.score >= 8) {\n      status = \"Hot\";\n      route = \"active_outreach_alert\";\n      routingDestination = \"active_outreach_pipeline\";\n      reviewStatus = \"auto_approved\";\n      rejectionReason = null;\n    } else if (lead.score >= 5) {\n      status = \"Warm\";\n      route = \"nurture_sequence\";\n      routingDestination = \"nurture_pipeline\";\n      reviewStatus = \"auto_approved\";\n      rejectionReason = null;\n    } else {\n      status = \"Not a fit\";\n      route = \"human_review_queue\";\n      routingDestination = \"human_review_queue\";\n      reviewStatus = \"pending_human_approval\";\n      rejectionReason = lead.score_reason || \"Low commercial alignment or non-buyer profile.\";\n      emailText = null; \n    }\n\n    // Helper to derive clean names and company names from email/ID if missing\n    const emailStr = lead.email || \"\";\n    let derivedName = lead.full_name || emailStr.split(\"@\")[0] || \"Unknown\";\n    derivedName = derivedName.charAt(0).toUpperCase() + derivedName.slice(1).replace(\".\", \" \");\n\n    let derivedCompany = lead.company_name || \"\";\n    if (!derivedCompany && emailStr.includes(\"@\")) {\n      const domain = emailStr.split(\"@\")[1];\n      if (domain && !domain.includes(\"gmail\")) {\n        const compPart = domain.split(\".\")[0];\n        derivedCompany = compPart.charAt(0).toUpperCase() + compPart.slice(1);\n      } else {\n        derivedCompany = \"Independent / Self\";\n      }\n    }\n\n    return {\n      json: {\n        raw_lead_id: lead.lead_id ? lead.lead_id.toString() : null,\n        email: lead.email,\n        full_name: derivedName,\n        company_name: derivedCompany,\n        status: status,\n        rejection_reason: rejectionReason,\n        fit_score: lead.score,\n        score_reason: lead.score_reason,\n        matched_service: lead.matched_service,\n        route: route,\n        generated_email: emailText,\n        company_size: lead.company_size || null,\n        funding_stage: lead.funding_stage || null,\n        linkedin_activity: lead.linkedin_activity || null,\n        review_status: reviewStatus,\n        routing_destination: routingDestination\n      }\n    };\n  });\n\n  return processedItems;\n\n} catch (err) {\n  return [{ \n    json: { \n      error: \"JSON Parsing Failed\", \n      details: err.message,\n      extracted_text: rawText \n    } \n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        128
+      ],
+      "id": "6c9e4c97-de8a-4d27-9c42-9fb3b3d6717d",
+      "name": "Client E-mails"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.site/d12381ca-1e57-473f-8cca-861a61ba5be3",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1248,
+        128
+      ],
+      "id": "8a617ec6-4b50-4853-be2d-f4c0cde7f5e4",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "processed_leads",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "=email",
+              "condition": "eq",
+              "keyValue": "={{ $json.email }}"
+            }
+          ]
+        },
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        128
+      ],
+      "id": "f2cc5b98-30f0-4f60-a556-4dc46601e824",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "95tVOAudKPz26NsE",
+          "name": "supa lead db"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Identify data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Prepare batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify data": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare batch": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Client E-mails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client E-mails": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "fc4bd357-aa12-4461-9ab1-10fb4d4a0434",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dba1e5ad9eb5124efbb5af75223aee1426f2e7f55a7929e042448d0d6d69d96b"
+  },
+  "nodeGroups": [],
+  "id": "mNg8wbO07UQywugE",
+  "tags": []
+}
