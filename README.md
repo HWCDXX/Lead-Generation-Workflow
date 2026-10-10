@@ -6,6 +6,27 @@ This document provides a comprehensive, uncompromising look into every architect
 
 ---
 
+--- 
+## Architectural Caveat: Zoho CRM Authentication & Webhook Endpoint Substitution
+
+During the final phase of pipeline development, we encountered an unrecoverable integration roadblock with the native Zoho CRM node due to enterprise authentication constraints. Because this section represents a critical real-world pivot, it has been formally integrated into our architectural documentation.
+
+### 1. The Root Obstacle: Token Access & OAuth Blockades
+* **Localhost Callback Drops:** Running n8n in a self-hosted Docker container behind `localhost:5678` introduced network routing mismatches. The external browser successfully authenticated with Zoho's OAuth server, but the internal redirect callback listener dropped the authorization code exchange, persistently throwing `Unable to sign without access token` exceptions.
+* **Console Deprecations:** Recent updates to the Zoho API Console removed legacy manual token generation tabs, and restricted IAM scopes blocked automated server-to-server token provisioning without a registered production domain.
+
+### 2. The Engineering Pivot: Dynamic Webhook Substitution
+Rather than halting pipeline delivery to debug proprietary third-party IAM layers, we executed a strategic architectural pivot:
+* **Decoupled Payload Delivery:** We bypassed the rigid Zoho CRM native node entirely and replaced it with a generic **HTTP Request node** configured for `POST` operations.
+* **Webhook Endpoint Routing:** Outbound payloads are dispatched directly to a unique, dedicated webhook endpoint URL (`Webhook.site`), serving as an isolated mock API receiver.
+
+### 3. Why This Strengthens the Architecture
+While initially adopted as a workaround for authentication blockades, this pattern introduces a major production benefit:
+* **Vendor Agnosticism:** By standardizing outbound payloads into clean JSON structures, the pipeline is completely decoupled from any single CRM vendor. 
+* **Plug-and-Play Extensibility:** Transitioning from the mock webhook endpoint to HubSpot, Salesforce, or Zoho in a production environment requires only swapping the destination URL and updating field mappings, leaving the core data staging and AI enrichment layers entirely untouched.
+
+----
+
 ## Table of Contents
 1. [Executive Summary & Core Architecture](#1-executive-summary--core-architecture)
 2. [Approach, Simplicity & Architectural Philosophy](#2-approach-simplicity--architectural-philosophy)
